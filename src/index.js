@@ -147,7 +147,8 @@ app.post("/request-circle",
 		windowMs: 30*60*1000,
 		max: 5,
 		delayMs: 500,
-		message: "slow down, try again later"
+		message: "slow down, try again later",
+		skip: checkIsAdmin
 	}),
 	async (req, res) => {
 		if (!checkToken(req, res)) return;
