@@ -1,0 +1,75 @@
+<!doctype html>
+<html>
+	<head>
+		<style>
+		table {
+			border-collapse: collapse;
+			width: 100%;
+		}
+
+		table td, table th {
+			border: 1px solid #ddd;
+			padding: 8px;
+		}
+
+		table tr:nth-child(even) { background-color: #f7f7f7; }
+
+		table th {
+			text-align: left;
+			background-color: rgb(112, 112, 112);
+			color: white;
+		}
+
+		a {
+			text-decoration: none;
+		}
+
+		a:visited {
+			color: rgb(0, 0, 238);
+		}
+		</style>
+
+		<title>Manage Requests</title>
+	</head>
+
+	<body>
+		<table>
+			<tr>
+				<th>Username</th>
+				<th>Secret Key</th>
+				<th>Post ID</th>
+				<th>Approve</th>
+				<th>Deny</th>
+			</tr>
+			<% for (const request of requests) { %>
+			<tr>
+				<td>
+					<a href="https://reddit.com/u/<%= request.username %>">
+						<%= request.username %>
+					</a>
+				</td>
+				<td><%= request.key %></td>
+				<td><a href="https://redd.it/<%= request.id %>"><%= request.id %></a></td>
+				<td>
+					<form
+						enctype="application/x-www-form-urlencoded"
+						method="POST">
+						<input type="hidden" name="action" value="approve">
+						<input type="hidden" name="username" value="<%= request.username %>">
+						<input type="submit" value="Approve">
+					</form>
+				</td>
+				<td>
+					<form
+						enctype="application/x-www-form-urlencoded"
+						method="POST">
+						<input type="hidden" name="action" value="deny">
+						<input type="hidden" name="username" value="<%= request.username %>">
+						<input type="submit" value="Deny">
+					</form>
+				</td>
+			</tr>
+			<% } %>
+		</table>
+	</body>
+</html>

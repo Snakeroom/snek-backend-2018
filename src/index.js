@@ -1,23 +1,65 @@
 const express = require("express");
-const session = require("express-session");
+const cookieSession = require("cookie-session");
 const bodyParser = require("body-parser");
+const { encode } = require("ent");
 const { createServer } = require("http");
 const WebSocketServer = require("uws").Server;
-const reddit = require("./reddit");
 const config = require("../config.json");
+const db = require("./db");
+const reddit = require("./reddit");
+
+const ID_REGEX = /\/([a-z0-9]{6})(\/|$)/;
+
+// Send the join_circle event to all clients
+const broadcastCircle = (id, key) => {
+	wss.clients.forEach(client => {
+		client.send(JSON.stringify({
+			type: "join_circle",
+			payload: {
+				id,
+				key
+			}
+		}));
+	});
+};
+
+// If the user is not an admin, deny access
+const checkIsAdmin = async (req, res) => {
+	if (!checkToken(req, res)) return false;
+
+	const data = await reddit.getMe(req.session.access_token);
+	if (!config.admins.includes(data.name)) {
+		res.status(401).send("not an admin");
+		return false;
+	}
+
+	return true;
+};
+
+// Makes sure user has an access token
+const checkToken = (req, res) => {
+	if (!req.session.access_token) {
+		res.status(401).send("not authorized");
+		return false;
+	}
+
+	return true;
+};
 
 const app = express();
-const server = createServer(app);
-const wss = new WebSocketServer({ server });
 
+app.set("view engine", "ejs");
 app.use(bodyParser.urlencoded({
 	extended: false
 }));
-app.use(session({
-	secret: config.secret,
-	resave: false,
-	saveUninitialized: true
-}));
+
+const sessionParser = cookieSession({
+	name: "session",
+	keys: [config.secret],
+
+	maxAge: 144 * 60 * 60 * 1000
+});
+app.use(sessionParser);
 
 app.get("/auth", (req, res) => {
 	res.redirect(reddit.getRedirect(req));
@@ -32,34 +74,105 @@ app.get("/auth/check", async (req, res) => {
 	// Update the session with access token
 	const data = await reddit.getAccessToken(req.query.code);
 	req.session.access_token = data.access_token;
+	res.send("You may close this tab.");
+});
+
+app.get("/authenticated", (req, res) => {
+	res.header("Access-Control-Allow-Origin", req.header("origin"));
+	res.header("Access-Control-Allow-Credentials", "true");
+
+	res.json({
+		access_token: req.session.access_token,
+		authenticated: !!req.session.access_token
+	});
+});
+
+app.post("/request-circle", async (req, res) => {
+	res.header("Access-Control-Allow-Origin", req.header("origin"));
+	res.header("Access-Control-Allow-Credentials", "true");
+
+	if (!checkToken(req, res)) return;
+
+	if (!req.body.url || !req.body.key || !req.body.url.match(ID_REGEX)) {
+		return res.status(400).send("invalid params");
+	}
+
+	const insertRequest = () => {
+		db.put(username, JSON.stringify({
+			id: encode(req.body.url.match(ID_REGEX)[1]),
+			key: encode(req.body.key)
+		}));
+
+		res.send("Success!");
+	};
+
+	const username = (await reddit.getMe(req.session.access_token)).name;
+	db.get(username)
+		// Already requested before. If user is an admin, allow - else deny
+		.then(async () => {
+			const data = await reddit.getMe(req.session.access_token);
+			if (!config.admins.includes(data.name)) res.status(409).send("already requested");
+			else insertRequest();
+		})
+		// Haven't requested, add it to database
+		.catch(insertRequest);
+});
+
+app.post("/requests", async (req, res, next) => {
+	if (!checkIsAdmin(req, res)) return;
+
+	if (!req.body.action || !req.body.username) {
+		return res.status(400).send("invalid params");
+	}
+
+	if (req.body.action === "approve") {
+		const { id, key } = JSON.parse((await db.get(req.body.username)).toString("utf-8"));
+		broadcastCircle(id, key);
+	}
+
+	await db.put(req.body.username, req.body.action);
+	next()
+});
+
+app.all("/requests", (req, res) => {
+	if (!checkIsAdmin(req, res)) return;
+
+	const requests = [];
+
+	db.createReadStream()
+		.on("data", data => {
+			const username = data.key.toString("utf-8");
+			const strValue = data.value.toString("utf-8");
+			if (strValue === "approve" || strValue === "deny") return;
+
+			const value = JSON.parse(strValue);
+			requests.push({
+				username,
+				id: value.id,
+				key: value.key
+			});
+		})
+		.on("end", () => {
+			res.render("requests", { requests });
+		});
+})
+
+app.post("/send-circle", async (req, res) => {
+	if (!await checkIsAdmin(req, res)) return;
+
+	broadcastCircle(req.body.id, req.body.key);
 	res.send("Success!");
 });
 
-app.post("/send-circle", async (req, res) => {
-	// Make sure user has an access token
-	if (!req.session.access_token) {
-		return res.status(401).send("not authorized");
+const server = createServer(app);
+const wss = new WebSocketServer({ server });
+
+wss.on("connection", client => {
+	sessionParser(client.upgradeReq, {}, () => {});
+	if (!client.upgradeReq.session.access_token) {
+		client.close();
+		return;
 	}
-
-	// Get the logged in user's me.json data
-	const data = (await reddit.getMe(req.session.access_token));
-	// If the user is not an admin, deny access
-	if (!config.admins.includes(data.name)) {
-		return res.status(401).send("not an admin");
-	}
-
-	// Send the join_circle event to all clients
-	wss.clients.forEach(client => {
-		client.send(JSON.stringify({
-			type: "join_circle",
-			payload: {
-				id: req.body.id,
-				key: req.body.key
-			}
-		}));
-	});
-
-	res.send("Success!");
-})
+});
 
 server.listen(process.env.PORT || 3000, () => console.log("Listening"));
