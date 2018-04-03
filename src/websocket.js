@@ -12,6 +12,10 @@ exports.disconnectUser = name => {
 	delete userToSocket[name];
 };
 
+exports.sendToAll = data => {
+	wss.clients.forEach(client => client.send(data));
+};
+
 exports.init = (server, sessionParser) => {
 	wss = new WebSocketServer({ server });
 

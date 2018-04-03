@@ -1,6 +1,7 @@
 const rp = require("request-promise");
 const config = require("../config.json");
 
+let cookie = "";
 let modhash = "";
 
 exports.init = async () => {
@@ -16,5 +17,28 @@ exports.init = async () => {
 		json: true
 	});
 
+	cookie = body.json.data.cookie;
 	modhash = body.json.data.modhash;
-}
+};
+
+exports.check = async (id, key) => {
+	try {
+		const body = await rp("https://www.reddit.com/api/guess_voting_key.json", {
+			method: "POST",
+			form: {
+				id,
+				vote_key: key
+			},
+			headers: {
+				cookie: `reddit_session=${cookie}`,
+				"x-modhash": modhash
+			},
+			json: true
+		});
+
+		return body[key];
+	} catch (e) {
+		console.log(e)
+		return false;
+	}
+};

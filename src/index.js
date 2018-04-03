@@ -15,15 +15,13 @@ const ID_REGEX = /\/([a-z0-9]{6})(\/|$)/;
 
 // Send the join_circle event to all clients
 const broadcastCircle = (id, key) => {
-	wss.clients.forEach(client => {
-		client.send(JSON.stringify({
-			type: "join_circle",
-			payload: {
-				id,
-				key
-			}
-		}));
-	});
+	websocket.sendToAll(JSON.stringify({
+		type: "join_circle",
+		payload: {
+			id,
+			key
+		}
+	}));
 };
 
 // If the user is not an admin, deny access
@@ -52,6 +50,7 @@ const app = express();
 
 checker.init();
 
+app.enable("trust proxy");
 app.set("view engine", "ejs");
 app.use(bodyParser.urlencoded({
 	extended: false
@@ -147,9 +146,15 @@ app.post("/request-circle", async (req, res) => {
 		return res.status(400).send("invalid params");
 	}
 
-	const insertRequest = () => {
+	const insertRequest = async () => {
+		const id = "t3_" + encode(req.body.url.match(ID_REGEX)[1]);
+		if (!await checker.check(id, req.body.key)) {
+			res.status(400).send("invalid key/url");
+			return;
+		}
+
 		db.put(username, JSON.stringify({
-			id: "t3_" + encode(req.body.url.match(ID_REGEX)[1]),
+			id,
 			key: encode(req.body.key)
 		}));
 
