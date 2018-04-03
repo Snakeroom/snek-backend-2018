@@ -99,7 +99,7 @@ app.post("/request-circle", async (req, res) => {
 
 	const insertRequest = () => {
 		db.put(username, JSON.stringify({
-			id: encode(req.body.url.match(ID_REGEX)[1]),
+			id: "t3_" + encode(req.body.url.match(ID_REGEX)[1]),
 			key: encode(req.body.key)
 		}));
 
