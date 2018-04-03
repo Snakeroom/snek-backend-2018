@@ -114,7 +114,7 @@ app.post("/request-circle", async (req, res) => {
 		res.send("Success!");
 	};
 
-	const username = req.session.username;
+	const username = req.session.name;
 	db.get(username)
 		// Already requested before. If user is an admin, allow - else deny
 		.then(async () => {
