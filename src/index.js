@@ -158,7 +158,7 @@ app.post("/request-circle",
 		}
 
 		const insertRequest = async () => {
-			const id = "t3_" + encode(req.body.url.match(ID_REGEX)[1]);
+			const id = "t3_" + req.body.url.match(ID_REGEX)[1];
 			if (!await checker.check(id, req.body.key)) {
 				res.status(400).send("invalid key/url");
 				return;
@@ -166,7 +166,7 @@ app.post("/request-circle",
 
 			db.put(username, JSON.stringify({
 				id,
-				key: encode(req.body.key)
+				key: req.body.key
 			}));
 
 			res.send("Success!");
@@ -214,8 +214,8 @@ app.all("/requests", (req, res) => {
 			const value = JSON.parse(strValue);
 			requests.push({
 				username,
-				id: value.id,
-				key: value.key
+				id: encode(value.id),
+				key: encode(value.key)
 			});
 		})
 		.on("end", () => {
