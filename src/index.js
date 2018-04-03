@@ -24,11 +24,10 @@ const broadcastCircle = (id, key) => {
 };
 
 // If the user is not an admin, deny access
-const checkIsAdmin = async (req, res) => {
+const checkIsAdmin = (req, res) => {
 	if (!checkToken(req, res)) return false;
 
-	const data = await reddit.getMe(req.session.access_token);
-	if (!config.admins.includes(data.name)) {
+	if (!config.admins.includes(req.session.name)) {
 		res.status(401).send("not an admin");
 		return false;
 	}
@@ -71,9 +70,15 @@ app.get("/auth/check", async (req, res) => {
 		return res.status(401).send("invalid state");
 	}
 
+	if (req.query.error) {
+		return res.status(401).send("permission was declined, try again");
+	}
+
 	// Update the session with access token
 	const data = await reddit.getAccessToken(req.query.code);
+	const username = (await reddit.getMe(data.access_token)).name;
 	req.session.access_token = data.access_token;
+	req.session.name = username;
 	res.send("You may close this tab.");
 });
 
@@ -106,12 +111,11 @@ app.post("/request-circle", async (req, res) => {
 		res.send("Success!");
 	};
 
-	const username = (await reddit.getMe(req.session.access_token)).name;
+	const username = req.session.username;
 	db.get(username)
 		// Already requested before. If user is an admin, allow - else deny
 		.then(async () => {
-			const data = await reddit.getMe(req.session.access_token);
-			if (!config.admins.includes(data.name)) res.status(409).send("already requested");
+			if (!config.admins.includes(username)) res.status(409).send("already requested");
 			else insertRequest();
 		})
 		// Haven't requested, add it to database
@@ -157,22 +161,17 @@ app.all("/requests", (req, res) => {
 		});
 })
 
-app.post("/send-circle", async (req, res) => {
-	if (!await checkIsAdmin(req, res)) return;
-
-	broadcastCircle(req.body.id, req.body.key);
-	res.send("Success!");
-});
-
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
 wss.on("connection", client => {
-	sessionParser(client.upgradeReq, {}, () => {});
-	if (!client.upgradeReq.session.access_token) {
-		client.close();
-		return;
-	}
+	try {
+		sessionParser(client.upgradeReq, {}, () => {});
+		if (!client.upgradeReq.session.access_token) {
+			client.close();
+			return;
+		}
+	} catch (e) { }
 });
 
 server.listen(process.env.PORT || 3000, () => console.log("Listening"));
