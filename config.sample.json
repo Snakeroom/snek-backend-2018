@@ -1,5 +1,9 @@
 {
 	"admins": [],
+	"check_account": {
+		"username": "",
+		"password": ""
+	},
 	"reddit": {
 		"client_id": "",
 		"client_secret": "",

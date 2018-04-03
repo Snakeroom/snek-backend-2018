@@ -1,6 +1,7 @@
 const express = require("express");
 const cookieSession = require("cookie-session");
 const bodyParser = require("body-parser");
+const checker = require("./checker");
 const { encode } = require("ent");
 const { createServer } = require("http");
 const WebSocketServer = require("uws").Server;
@@ -46,6 +47,8 @@ const checkToken = (req, res) => {
 };
 
 const app = express();
+
+checker.init();
 
 app.set("view engine", "ejs");
 app.use(bodyParser.urlencoded({
@@ -171,7 +174,16 @@ wss.on("connection", client => {
 			client.close();
 			return;
 		}
+
+		client.send(JSON.stringify({ type: "ping" }));
 	} catch (e) { }
 });
 
 server.listen(process.env.PORT || 3000, () => console.log("Listening"));
+
+// Ping every 90s to keep CloudFlare from closing the socket
+setInterval(() => {
+	wss.clients.forEach(client => {
+		client.send(JSON.stringify({ type: "ping" }));
+	});
+}, 90000);
