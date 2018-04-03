@@ -1,4 +1,3 @@
-const levelup = require("levelup");
-const leveldown = require("leveldown");
+const level = require("level");
 
-module.exports = levelup(leveldown("database"));
+module.exports = level("database");

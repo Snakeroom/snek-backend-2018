@@ -1,13 +1,15 @@
 const express = require("express");
-const cookieSession = require("cookie-session");
+const session = require("express-session");
+const LevelStore = require("level-session-store")(session);
 const bodyParser = require("body-parser");
-const checker = require("./checker");
 const { encode } = require("ent");
 const { createServer } = require("http");
-const WebSocketServer = require("uws").Server;
 const config = require("../config.json");
+const checker = require("./checker");
 const db = require("./db");
 const reddit = require("./reddit");
+const { banUser, isAdmin, isBanned } = require("./utils");
+const websocket = require("./websocket");
 
 const ID_REGEX = /\/([a-z0-9]{6})(\/|$)/;
 
@@ -28,7 +30,7 @@ const broadcastCircle = (id, key) => {
 const checkIsAdmin = (req, res) => {
 	if (!checkToken(req, res)) return false;
 
-	if (!config.admins.includes(req.session.name)) {
+	if (!isAdmin(req.session.name)) {
 		res.status(401).send("not an admin");
 		return false;
 	}
@@ -55,13 +57,26 @@ app.use(bodyParser.urlencoded({
 	extended: false
 }));
 
-const sessionParser = cookieSession({
-	name: "session",
-	keys: [config.secret],
-
-	maxAge: 144 * 60 * 60 * 1000
+const sessionParser = session({
+	cookie: {
+		maxAge: 144 * 60 * 60 * 1000
+	},
+	resave: false,
+	saveUninitialized: false,
+	secret: config.secret,
+	store: new LevelStore()
 });
 app.use(sessionParser);
+
+// Check if user is banned, and delete session if so
+app.all("*", async (req, res, next) => {
+	if (req.session.name && await isBanned(req.session.name)) {
+		req.session.destroy();
+		res.status(401).send("you're banned");
+	} else {
+		next();
+	}
+});
 
 app.get("/auth", (req, res) => {
 	res.redirect(reddit.getRedirect(req));
@@ -80,6 +95,11 @@ app.get("/auth/check", async (req, res) => {
 	// Update the session with access token
 	const data = await reddit.getAccessToken(req.query.code);
 	const username = (await reddit.getMe(data.access_token)).name;
+	if (await isBanned(username)) {
+		res.status(401).send("you're banned");
+		return;
+	}
+
 	req.session.access_token = data.access_token;
 	req.session.name = username;
 	res.send("You may close this tab.");
@@ -93,6 +113,28 @@ app.get("/authenticated", (req, res) => {
 		access_token: req.session.access_token,
 		authenticated: !!req.session.access_token
 	});
+});
+
+app.post("/ban", async (req, res, next) => {
+	if (!checkIsAdmin(req, res)) return;
+
+	if (!req.body.action || !req.body.name) {
+		return res.status(400).send("invalid params");
+	}
+
+	if (req.body.action === "ban") {
+		await banUser(req.body.name);
+	} else if (req.body.action === "unban") {
+		await unbanUser(req.body.name);
+	}
+
+	next();
+});
+
+app.all("/ban", (req, res) => {
+	if (!checkIsAdmin(req, res)) return;
+
+	res.render("ban");
 });
 
 app.post("/request-circle", async (req, res) => {
@@ -118,7 +160,7 @@ app.post("/request-circle", async (req, res) => {
 	db.get(username)
 		// Already requested before. If user is an admin, allow - else deny
 		.then(async () => {
-			if (!config.admins.includes(username)) res.status(409).send("already requested");
+			if (!isAdmin(username)) res.status(409).send("already requested");
 			else insertRequest();
 		})
 		// Haven't requested, add it to database
@@ -165,25 +207,6 @@ app.all("/requests", (req, res) => {
 })
 
 const server = createServer(app);
-const wss = new WebSocketServer({ server });
-
-wss.on("connection", client => {
-	try {
-		sessionParser(client.upgradeReq, {}, () => {});
-		if (!client.upgradeReq.session.access_token) {
-			client.close();
-			return;
-		}
-
-		client.send(JSON.stringify({ type: "ping" }));
-	} catch (e) { }
-});
+websocket.init(server, sessionParser);
 
 server.listen(process.env.PORT || 3000, () => console.log("Listening"));
-
-// Ping every 90s to keep CloudFlare from closing the socket
-setInterval(() => {
-	wss.clients.forEach(client => {
-		client.send(JSON.stringify({ type: "ping" }));
-	});
-}, 90000);
