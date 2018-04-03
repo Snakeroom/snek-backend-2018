@@ -2,6 +2,7 @@ const express = require("express");
 const session = require("express-session");
 const LevelStore = require("level-session-store")(session);
 const bodyParser = require("body-parser");
+const RateLimit = require("express-rate-limit");
 const { encode } = require("ent");
 const { createServer } = require("http");
 const config = require("../config.json");
@@ -136,41 +137,49 @@ app.all("/ban", (req, res) => {
 	res.render("ban");
 });
 
-app.post("/request-circle", async (req, res) => {
-	res.header("Access-Control-Allow-Origin", req.header("origin"));
-	res.header("Access-Control-Allow-Credentials", "true");
+app.post("/request-circle",
+	new RateLimit({
+		windowMs: 30*60*1000,
+		max: 5,
+		delayMs: 500,
+		message: "slow down, try again later"
+	}),
+	async (req, res) => {
+		res.header("Access-Control-Allow-Origin", req.header("origin"));
+		res.header("Access-Control-Allow-Credentials", "true");
 
-	if (!checkToken(req, res)) return;
+		if (!checkToken(req, res)) return;
 
-	if (!req.body.url || !req.body.key || !req.body.url.match(ID_REGEX)) {
-		return res.status(400).send("invalid params");
-	}
-
-	const insertRequest = async () => {
-		const id = "t3_" + encode(req.body.url.match(ID_REGEX)[1]);
-		if (!await checker.check(id, req.body.key)) {
-			res.status(400).send("invalid key/url");
-			return;
+		if (!req.body.url || !req.body.key || !req.body.url.match(ID_REGEX)) {
+			return res.status(400).send("invalid params");
 		}
 
-		db.put(username, JSON.stringify({
-			id,
-			key: encode(req.body.key)
-		}));
+		const insertRequest = async () => {
+			const id = "t3_" + encode(req.body.url.match(ID_REGEX)[1]);
+			if (!await checker.check(id, req.body.key)) {
+				res.status(400).send("invalid key/url");
+				return;
+			}
 
-		res.send("Success!");
-	};
+			db.put(username, JSON.stringify({
+				id,
+				key: encode(req.body.key)
+			}));
 
-	const username = req.session.name;
-	db.get(username)
-		// Already requested before. If user is an admin, allow - else deny
-		.then(async () => {
-			if (!isAdmin(username)) res.status(409).send("already requested");
-			else insertRequest();
-		})
-		// Haven't requested, add it to database
-		.catch(insertRequest);
-});
+			res.send("Success!");
+		};
+
+		const username = req.session.name;
+		db.get(username)
+			// Already requested before. If user is an admin, allow - else deny
+			.then(async () => {
+				if (!isAdmin(username)) res.status(409).send("already requested");
+				else insertRequest();
+			})
+			// Haven't requested, add it to database
+			.catch(insertRequest);
+	}
+);
 
 app.post("/requests", async (req, res, next) => {
 	if (!checkIsAdmin(req, res)) return;
