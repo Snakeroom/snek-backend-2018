@@ -14,6 +14,13 @@ const websocket = require("./websocket");
 
 const ID_REGEX = /\/([a-z0-9]{6})(\/|$)/;
 
+// Add cors headers to a response
+const addCors = (req, res, next) => {
+	res.header("Access-Control-Allow-Origin", req.header("origin"));
+	res.header("Access-Control-Allow-Credentials", "true");
+	next();
+};
+
 // Send the join_circle event to all clients
 const broadcastCircle = (id, key) => {
 	websocket.sendToAll(JSON.stringify({
@@ -105,10 +112,7 @@ app.get("/auth/check", async (req, res) => {
 	res.send("You may close this tab.");
 });
 
-app.get("/authenticated", (req, res) => {
-	res.header("Access-Control-Allow-Origin", req.header("origin"));
-	res.header("Access-Control-Allow-Credentials", "true");
-
+app.get("/authenticated", addCors, (req, res) => {
 	res.json({
 		access_token: req.session.access_token,
 		authenticated: !!req.session.access_token
@@ -138,6 +142,7 @@ app.all("/ban", (req, res) => {
 });
 
 app.post("/request-circle",
+	addCors,
 	new RateLimit({
 		windowMs: 30*60*1000,
 		max: 5,
@@ -145,9 +150,6 @@ app.post("/request-circle",
 		message: "slow down, try again later"
 	}),
 	async (req, res) => {
-		res.header("Access-Control-Allow-Origin", req.header("origin"));
-		res.header("Access-Control-Allow-Credentials", "true");
-
 		if (!checkToken(req, res)) return;
 
 		if (!req.body.url || !req.body.key || !req.body.url.match(ID_REGEX)) {
